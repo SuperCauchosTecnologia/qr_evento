@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Check-in Evento</title>
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <style>
+        :root { --p: #2563eb; --s: #16a34a; --err: #dc2626; --bg: #f3f4f6; }
+        body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); margin: 0; padding: 15px; text-align: center; }
+        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); margin-bottom: 15px; }
+        #reader { width: 100%; max-width: 400px; margin: 0 auto; border-radius: 12px; overflow: hidden; background: #000; }
+        .stats { display: flex; justify-content: space-around; margin: 15px 0; }
+        .stat-num { display: block; font-size: 24px; font-weight: bold; color: var(--p); }
+        .btn { border: none; padding: 16px; border-radius: 8px; font-weight: bold; cursor: pointer; width: 100%; font-size: 16px; margin-top: 10px; transition: 0.2s; }
+        #btn-scan { background: var(--p); color: white; }
+        #btn-validar { background: var(--s); color: white; display: none; }
+        .info-res { display: none; margin-top: 15px; text-align: left; border-top: 1px solid #eee; padding-top: 15px; }
+        .loading { color: #666; font-style: italic; }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <h2>Registro de Invitados</h2>
+        <div class="stats">
+            <div>Llegaron <span id="txt-llegaron" class="stat-num">0</span></div>
+            <div>Pendientes <span id="txt-pendientes" class="stat-num">0</span></div>
+        </div>
+        <button id="btn-scan" class="btn" onclick="iniciarCamara()">📷 ACTIVAR CÁMARA</button>
+    </div>
+
+    <div id="reader"></div>
+
+    <div id="info-box" class="card info-res">
+        <h3 id="u-nombre" style="margin:0"></h3>
+        <p id="u-tipo" style="color:#666; margin:5px 0"></p>
+        <button id="btn-validar" class="btn" onclick="validarIngreso()">CONFIRMAR ENTRADA</button>
+    </div>
+
+    <script>
+        const API_URL = "TU_API_URL_AQUÍ"; // <--- PEGA AQUÍ TU URL DE SHEETDB
+        let html5QrCode;
+        let selectedUser = null;
+
+        async function obtenerStats() {
+            try {
+                const r = await fetch(API_URL);
+                const data = await r.json();
+                let llegaron = 0, total = 0;
+                data.forEach(row => {
+                    if(row.ID1) { total++; if(row.ENTRADA1) llegaron++; }
+                    if(row.ID2) { total++; if(row.ENTRADA2) llegaron++; }
+                });
+                document.getElementById('txt-llegaron').innerText = llegaron;
+                document.getElementById('txt-pendientes').innerText = total - llegaron;
+            } catch(e) { console.error("Error stats", e); }
+        }
+
+        function iniciarCamara() {
+            document.getElementById('btn-scan').style.display = 'none';
+            html5QrCode = new Html5Qrcode("reader");
+            html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, onScanSuccess);
+            obtenerStats();
+        }
+
+        async function onScanSuccess(decodedText) {
+            html5QrCode.pause(true);
+            const infoBox = document.getElementById('info-box');
+            const uNombre = document.getElementById('u-nombre');
+            infoBox.style.display = 'block';
+            uNombre.innerText = "Buscando...";
+            
+            try {
+                // Buscamos en ambas columnas usando el filtro de SheetDB
+                const [r1, r2] = await Promise.all([
+                    fetch(`${API_URL}/search?ID1=${decodedText}`).then(r => r.json()),
+                    fetch(`${API_URL}/search?ID2=${decodedText}`).then(r => r.json())
+                ]);
+
+                if (r1.length > 0) {
+                    prepararValidacion(r1[0], 'ID1', 'ENTRADA1');
+                } else if (r2.length > 0) {
+                    prepararValidacion(r2[0], 'ID2', 'ENTRADA2');
+                } else {
+                    uNombre.innerHTML = "<span style='color:red'>NO ENCONTRADO</span>";
+                    setTimeout(reiniciar, 2000);
+                }
+            } catch (e) { alert("Error de red"); reiniciar(); }
+        }
+
+        function prepararValidacion(user, idCol, entryCol) {
+            selectedUser = { id: user[idCol], col: idCol, entry: entryCol };
+            document.getElementById('u-nombre').innerText = user[idCol === 'ID1' ? 'USUARIO1' : 'USUARIO2'];
+            document.getElementById('u-tipo').innerText = "Tipo: " + user[idCol === 'ID1' ? 'TIPO1' : 'TIPO2'];
+            document.getElementById('btn-validar').style.display = 'block';
+        }
+
+        async function validarIngreso() {
+            const btn = document.getElementById('btn-validar');
+            btn.disabled = true; btn.innerText = "REGISTRANDO...";
+            
+            const payload = {};
+            payload[selectedUser.entry] = new Date().toLocaleString();
+
+            try {
+                await fetch(`${API_URL}/${selectedUser.col}/${selectedUser.id}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ data: [payload] })
+                });
+                alert("✅ Registrado con éxito");
+                obtenerStats();
+                reiniciar();
+            } catch (e) { alert("Error al guardar"); btn.disabled = false; }
+        }
+
+        function reiniciar() {
+            document.getElementById('info-box').style.display = 'none';
+            document.getElementById('btn-validar').style.display = 'none';
+            document.getElementById('btn-validar').disabled = false;
+            document.getElementById('btn-validar').innerText = "CONFIRMAR ENTRADA";
+            html5QrCode.resume();
+        }
+
+        obtenerStats();
+    </script>
+</body>
+</html>
