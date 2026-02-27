@@ -3,80 +3,69 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Scanner Evento Realtime</title>
+    <title>Scanner Evento Final</title>
     <script src="https://unpkg.com/html5-qrcode"></script>
     <style>
-        :root { --p: #2563eb; --s: #16a34a; --err: #dc2626; --bg: #f3f4f6; }
-        body { font-family: system-ui, sans-serif; background: var(--bg); margin: 0; padding: 15px; text-align: center; }
+        :root { --p: #2563eb; --s: #16a34a; --bg: #f3f4f6; }
+        body { font-family: sans-serif; background: var(--bg); margin: 0; padding: 15px; text-align: center; }
         .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 15px; }
-        #status-api { font-size: 12px; margin-bottom: 10px; font-weight: bold; }
-        .online { color: var(--s); } .offline { color: var(--err); }
-        #reader { width: 100%; max-width: 400px; margin: 0 auto; border-radius: 12px; overflow: hidden; background: #000; }
         .stats { display: flex; justify-content: space-around; margin: 15px 0; }
         .stat-num { display: block; font-size: 24px; font-weight: bold; color: var(--p); }
+        #reader { width: 100%; max-width: 400px; margin: 0 auto; border-radius: 12px; overflow: hidden; background: #000; min-height: 250px; }
         .btn { border: none; padding: 16px; border-radius: 8px; font-weight: bold; cursor: pointer; width: 100%; font-size: 16px; margin-top: 10px; }
         #btn-scan { background: var(--p); color: white; }
         #btn-validar { background: var(--s); color: white; display: none; }
-        .info-res { display: none; margin-top: 15px; text-align: left; border-top: 1px solid #eee; padding-top: 15px; }
-        .badge { background: #e0e7ff; color: #4338ca; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
+        .info-res { display: none; margin-top: 15px; text-align: left; border-top: 2px solid #eee; padding-top: 15px; }
+        #msg-buscando { display: none; color: #666; font-weight: bold; margin-top: 10px; }
     </style>
 </head>
 <body>
 
     <div class="card">
-        <div id="status-api">Verificando conexión...</div>
         <h2>Control de Acceso</h2>
         <div class="stats">
             <div>Llegaron <span id="txt-llegaron" class="stat-num">0</span></div>
             <div>Pendientes <span id="txt-pendientes" class="stat-num">0</span></div>
         </div>
-        <button id="btn-scan" class="btn" onclick="iniciarCamara()">📷 ACTIVAR CÁMARA</button>
+        <button id="btn-scan" class="btn" onclick="iniciarCamara()">📷 ABRIR CÁMARA</button>
     </div>
 
     <div id="reader"></div>
+    <div id="msg-buscando">🔍 Buscando en la base de datos...</div>
 
     <div id="info-box" class="card info-res">
-        <span class="badge" id="u-lista"></span>
-        <h3 id="u-nombre" style="margin:10px 0 5px 0"></h3>
-        <p id="u-tipo" style="color:#666; margin:0 0 15px 0"></p>
-        <button id="btn-validar" class="btn" onclick="validarIngreso()">CONFIRMAR ENTRADA</button>
+        <h3 id="u-nombre" style="margin:0; color: #111;"></h3>
+        <p id="u-tipo" style="color:#666; margin: 5px 0 15px 0;"></p>
+        <button id="btn-validar" class="btn" onclick="validarIngreso()">✅ CONFIRMAR ENTRADA</button>
     </div>
 
     <script>
-        // TU API CONECTADA DIRECTAMENTE
-        const API_URL = "https://sheetdb.io/api/v1/mhk3qdwz57vyk"; 
+        const API_URL = "https://sheetdb.io/api/v1/mhk3qdwz57vyk";
         let html5QrCode;
         let selectedUser = null;
 
-        // Función para obtener estadísticas y validar conexión
-        async function fetchStats() {
+        async function cargarStats() {
             try {
-                const response = await fetch(API_URL);
-                const data = await response.json();
+                const r = await fetch(API_URL);
+                const data = await r.json();
+                let llegaron = 0, total = 0;
                 
-                document.getElementById('status-api').innerText = "● CONECTADO AL SHEET";
-                document.getElementById('status-api').className = "online";
-
-                let llegaron = 0;
-                let total = 0;
-
                 data.forEach(row => {
-                    if (row.ID1 && row.ID1.toString().trim() !== "") {
-                        total++;
-                        if (row.ENTRADA1 && row.ENTRADA1.trim() !== "") llegaron++;
+                    if(row.ID1 && row.ID1.toString().trim() !== "") { 
+                        total++; 
+                        if(row.ENTRADA1 && row.ENTRADA1.toString().trim() !== "") llegaron++; 
                     }
-                    if (row.ID2 && row.ID2.toString().trim() !== "") {
-                        total++;
-                        if (row.ENTRADA2 && row.ENTRADA2.trim() !== "") llegaron++;
+                    if(row.ID2 && row.ID2.toString().trim() !== "") { 
+                        total++; 
+                        if(row.ENTRADA2 && row.ENTRADA2.toString().trim() !== "") llegaron++; 
                     }
                 });
-
+                
                 document.getElementById('txt-llegaron').innerText = llegaron;
-                document.getElementById('txt-pendientes').innerText = (total - llegaron);
+                document.getElementById('txt-pendientes').innerText = total - llegaron;
                 return data;
-            } catch (error) {
-                document.getElementById('status-api').innerText = "● ERROR DE CONEXIÓN";
-                document.getElementById('status-api').className = "offline";
+            } catch(e) {
+                console.error("Error al conectar con SheetDB:", e);
                 return null;
             }
         }
@@ -86,93 +75,98 @@
             html5QrCode = new Html5Qrcode("reader");
             html5QrCode.start(
                 { facingMode: "environment" }, 
-                { fps: 15, qrbox: 250 }, 
+                { fps: 10, qrbox: {width: 250, height: 250} }, 
                 onScanSuccess
             ).catch(err => alert("Error de cámara: " + err));
+            cargarStats();
         }
 
         async function onScanSuccess(decodedText) {
-            // Pausar scanner y mostrar cargando
+            // 1. Pausar y mostrar estado
             html5QrCode.pause(true);
-            const infoBox = document.getElementById('info-box');
-            const uNombre = document.getElementById('u-nombre');
-            
-            infoBox.style.display = 'block';
-            uNombre.innerText = "Buscando invitado...";
-            document.getElementById('btn-validar').style.display = 'none';
+            document.getElementById('msg-buscando').style.display = 'block';
+            document.getElementById('info-box').style.display = 'none';
 
-            const data = await fetchStats(); // Obtenemos datos frescos
-            if (!data) return;
+            const idEscaneado = decodedText.trim();
+            const data = await cargarStats();
 
-            let found = null;
-            const scId = decodedText.trim();
+            if (!data) {
+                alert("Error: No se pudo conectar con la base de datos.");
+                reiniciar();
+                return;
+            }
 
+            let user = null;
+
+            // 2. Buscar ID en las dos columnas posibles
             for (let row of data) {
-                // Buscar en Columna A
-                if (row.ID1 && row.ID1.toString().trim() === scId) {
-                    found = { id: scId, nombre: row.USUARIO1, tipo: row.TIPO1, lista: "GRUPO 1", colSearch: "ID1", colEntry: "ENTRADA1" };
+                if (row.ID1 && row.ID1.toString().trim() === idEscaneado) {
+                    user = { id: idEscaneado, nombre: row.USUARIO1, tipo: row.TIPO1, colId: 'ID1', colEntry: 'ENTRADA1' };
                     break;
                 }
-                // Buscar en Columna E
-                if (row.ID2 && row.ID2.toString().trim() === scId) {
-                    found = { id: scId, nombre: row.USUARIO2, tipo: row.TIPO2, lista: "GRUPO 2", colSearch: "ID2", colEntry: "ENTRADA2" };
+                if (row.ID2 && row.ID2.toString().trim() === idEscaneado) {
+                    user = { id: idEscaneado, nombre: row.USUARIO2, tipo: row.TIPO2, colId: 'ID2', colEntry: 'ENTRADA2' };
                     break;
                 }
             }
 
-            if (found) {
-                selectedUser = found;
-                document.getElementById('u-lista').innerText = found.lista;
-                uNombre.innerText = found.nombre || "Invitado sin nombre";
-                document.getElementById('u-tipo').innerText = "Categoría: " + (found.tipo || "General");
+            // 3. Mostrar resultados
+            document.getElementById('msg-buscando').style.display = 'none';
+
+            if (user) {
+                selectedUser = user;
+                document.getElementById('info-box').style.display = 'block';
+                document.getElementById('u-nombre').innerText = user.nombre || "Invitado sin nombre";
+                document.getElementById('u-tipo').innerText = "Tipo: " + (user.tipo || "General");
                 document.getElementById('btn-validar').style.display = 'block';
             } else {
-                uNombre.innerHTML = "<span style='color:red'>ID " + scId + " NO ENCONTRADO</span>";
-                setTimeout(reiniciar, 3000);
+                alert("ID: " + idEscaneado + " no encontrado en el archivo.");
+                reiniciar();
             }
         }
 
         async function validarIngreso() {
             const btn = document.getElementById('btn-validar');
             btn.disabled = true;
-            btn.innerText = "ENVIANDO...";
+            btn.innerText = "💾 GUARDANDO...";
 
-            const now = new Date();
-            const timeString = now.getHours() + ":" + now.getMinutes().toString().padStart(2, '0');
+            // Formato de hora HH:MM:SS
+            const ahora = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
             
-            const updateData = {};
-            updateData[selectedUser.colEntry] = timeString;
+            const payload = {};
+            payload[selectedUser.colEntry] = ahora;
 
             try {
-                // Actualización vía PATCH usando la columna ID correspondiente
-                const response = await fetch(`${API_URL}/${selectedUser.colSearch}/${selectedUser.id}`, {
+                const response = await fetch(`${API_URL}/${selectedUser.colId}/${selectedUser.id}`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ data: [updateData] })
+                    body: JSON.stringify({ data: [payload] })
                 });
 
                 if (response.ok) {
-                    alert("¡Acceso validado!");
+                    alert("✅ Entrada registrada para: " + selectedUser.nombre);
+                    document.getElementById('info-box').style.display = 'none';
+                    await cargarStats();
                     reiniciar();
                 } else {
-                    throw new Error();
+                    throw new Error("Respuesta servidor no OK");
                 }
             } catch (e) {
-                alert("Error al guardar en Sheets");
+                alert("❌ Error al guardar. Revisa que la columna " + selectedUser.colEntry + " exista.");
                 btn.disabled = false;
-                btn.innerText = "CONFIRMAR ENTRADA";
+                btn.innerText = "✅ CONFIRMAR ENTRADA";
             }
         }
 
         function reiniciar() {
+            document.getElementById('msg-buscando').style.display = 'none';
             document.getElementById('info-box').style.display = 'none';
             selectedUser = null;
-            fetchStats(); // Refrescar contadores
-            html5QrCode.resume();
+            if (html5QrCode) html5QrCode.resume();
         }
 
-        // Carga inicial
-        fetchStats();
+        // Carga inicial de contadores
+        cargarStats();
     </script>
 </body>
 </html>
