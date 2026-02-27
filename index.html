@@ -3,26 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Scanner Evento - Final Check</title>
+    <title>Scanner Evento - Control de Acceso</title>
     <script src="https://unpkg.com/html5-qrcode"></script>
     <style>
-        :root { --p: #2563eb; --s: #16a34a; --bg: #f3f4f6; }
-        body { font-family: sans-serif; background: var(--bg); margin: 0; padding: 15px; text-align: center; }
+        :root { --p: #2563eb; --s: #16a34a; --err: #dc2626; --bg: #f3f4f6; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); margin: 0; padding: 15px; text-align: center; }
         .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 15px; }
         .stats { display: flex; justify-content: space-around; margin: 15px 0; }
-        .stat-num { display: block; font-size: 24px; font-weight: bold; color: var(--p); }
+        .stat-num { display: block; font-size: 26px; font-weight: bold; color: var(--p); }
         #reader { width: 100%; max-width: 400px; margin: 0 auto; border-radius: 12px; overflow: hidden; background: #000; min-height: 250px; }
-        .btn { border: none; padding: 16px; border-radius: 8px; font-weight: bold; cursor: pointer; width: 100%; font-size: 16px; margin-top: 10px; }
+        .btn { border: none; padding: 18px; border-radius: 8px; font-weight: bold; cursor: pointer; width: 100%; font-size: 16px; margin-top: 10px; transition: 0.3s; }
         #btn-scan { background: var(--p); color: white; }
         #btn-validar { background: var(--s); color: white; display: none; }
-        .info-res { display: none; margin-top: 15px; text-align: left; border-top: 2px solid #eee; padding-top: 15px; }
-        #debug-info { font-size: 10px; color: #ccc; margin-top: 20px; }
+        .info-res { display: none; margin-top: 15px; text-align: left; border-top: 3px solid #eee; padding-top: 15px; }
+        .ya-ingreso { color: var(--err); font-weight: bold; background: #fee2e2; padding: 10px; border-radius: 8px; margin-top: 10px; display: block; border: 1px solid #f87171; }
+        #debug-info { font-size: 11px; color: #999; margin-top: 20px; }
     </style>
 </head>
 <body>
 
     <div class="card">
-        <h2>Control de Acceso</h2>
+        <h2>Acceso al Evento</h2>
         <div class="stats">
             <div>Llegaron <span id="txt-llegaron" class="stat-num">0</span></div>
             <div>Pendientes <span id="txt-pendientes" class="stat-num">0</span></div>
@@ -34,36 +35,34 @@
 
     <div id="info-box" class="card info-res">
         <h3 id="u-nombre" style="margin:0; color: #111;"></h3>
-        <p id="u-tipo" style="color:#666; margin: 5px 0 15px 0;"></p>
+        <p id="u-tipo" style="color:#666; margin: 5px 0 10px 0;"></p>
+        <div id="msg-repetido"></div>
         <button id="btn-validar" class="btn" onclick="validarIngreso()">✅ CONFIRMAR ENTRADA</button>
     </div>
 
-    <div id="debug-info">Esperando conexión con la API...</div>
+    <div id="debug-info">Cargando base de datos...</div>
 
     <script>
-        // TU NUEVA API ACTUALIZADA
         const API_URL = "https://sheetdb.io/api/v1/mhk3qdwz57vyk";
         let html5QrCode;
         let selectedUser = null;
 
+        // Carga de datos y contadores
         async function cargarDatos() {
             try {
                 const r = await fetch(API_URL);
                 const data = await r.json();
-                console.log("Datos recibidos:", data); // Ver en consola
                 
-                if (!Array.isArray(data)) throw new Error("La API no devolvió una lista");
-
                 let llegaron = 0;
                 let total = 0;
 
-                data.forEach((row, index) => {
-                    // Verificamos ID1 (Columna A)
+                data.forEach(row => {
+                    // Contar Grupo 1
                     if (row.ID1 && row.ID1.toString().trim() !== "") {
                         total++;
                         if (row.ENTRADA1 && row.ENTRADA1.toString().trim() !== "") llegaron++;
                     }
-                    // Verificamos ID2 (Columna E)
+                    // Contar Grupo 2
                     if (row.ID2 && row.ID2.toString().trim() !== "") {
                         total++;
                         if (row.ENTRADA2 && row.ENTRADA2.toString().trim() !== "") llegaron++;
@@ -71,13 +70,11 @@
                 });
 
                 document.getElementById('txt-llegaron').innerText = llegaron;
-                document.getElementById('txt-pendientes').innerText = total - llegaron;
-                document.getElementById('debug-info').innerText = "Conectado. Total IDs detectados: " + total;
-                
+                document.getElementById('txt-pendientes').innerText = (total - llegaron);
+                document.getElementById('debug-info').innerText = "Conectado. Total Invitados: " + total;
                 return data;
             } catch (e) {
-                console.error("Error:", e);
-                document.getElementById('debug-info').innerText = "Error de conexión: " + e.message;
+                document.getElementById('debug-info').innerText = "Error de red: No se pudo conectar.";
                 return null;
             }
         }
@@ -87,7 +84,7 @@
             html5QrCode = new Html5Qrcode("reader");
             html5QrCode.start(
                 { facingMode: "environment" }, 
-                { fps: 10, qrbox: 250 }, 
+                { fps: 15, qrbox: 250 }, 
                 onScanSuccess
             ).catch(err => alert("Error de cámara: " + err));
             cargarDatos();
@@ -101,29 +98,52 @@
             if (!data) { reiniciar(); return; }
 
             let user = null;
+            let yaEntro = false;
+            let horaEntrada = "";
 
-            // Buscamos en los datos
             for (let row of data) {
-                // Buscamos en ID1
+                // Buscar en Lista 1
                 if (row.ID1 && row.ID1.toString().trim() === idEscaneado) {
                     user = { id: idEscaneado, nombre: row.USUARIO1, tipo: row.TIPO1, colId: 'ID1', colEntry: 'ENTRADA1' };
+                    if (row.ENTRADA1 && row.ENTRADA1.toString().trim() !== "") {
+                        yaEntro = true;
+                        horaEntrada = row.ENTRADA1;
+                    }
                     break;
                 }
-                // Buscamos en ID2
+                // Buscar en Lista 2
                 if (row.ID2 && row.ID2.toString().trim() === idEscaneado) {
                     user = { id: idEscaneado, nombre: row.USUARIO2, tipo: row.TIPO2, colId: 'ID2', colEntry: 'ENTRADA2' };
+                    if (row.ENTRADA2 && row.ENTRADA2.toString().trim() !== "") {
+                        yaEntro = true;
+                        horaEntrada = row.ENTRADA2;
+                    }
                     break;
                 }
             }
 
             if (user) {
                 selectedUser = user;
-                document.getElementById('info-box').style.display = 'block';
-                document.getElementById('u-nombre').innerText = user.nombre || "Sin nombre";
-                document.getElementById('u-tipo').innerText = "Cat: " + (user.tipo || "General");
-                document.getElementById('btn-validar').style.display = 'block';
+                const infoBox = document.getElementById('info-box');
+                const msgRepetido = document.getElementById('msg-repetido');
+                const btnValidar = document.getElementById('btn-validar');
+
+                infoBox.style.display = 'block';
+                document.getElementById('u-nombre').innerText = user.nombre || "Invitado";
+                document.getElementById('u-tipo').innerText = "Categoría: " + (user.tipo || "General");
+
+                if (yaEntro) {
+                    msgRepetido.innerHTML = `<span class="ya-ingreso">⚠️ YA INGRESÓ<br><small>Hora: ${horaEntrada}</small></span>`;
+                    btnValidar.style.display = 'none';
+                    setTimeout(reiniciar, 4000); // 4 segundos para ver el error y vuelve a escanear
+                } else {
+                    msgRepetido.innerHTML = "";
+                    btnValidar.style.display = 'block';
+                    btnValidar.disabled = false;
+                    btnValidar.innerText = "✅ CONFIRMAR ENTRADA";
+                }
             } else {
-                alert("El ID [" + idEscaneado + "] no existe en el Excel.");
+                alert("ID: " + idEscaneado + " NO ENCONTRADO EN NINGUNA LISTA.");
                 reiniciar();
             }
         }
@@ -131,14 +151,15 @@
         async function validarIngreso() {
             const btn = document.getElementById('btn-validar');
             btn.disabled = true;
-            btn.innerText = "REGISTRANDO...";
+            btn.innerText = "⏳ REGISTRANDO...";
 
-            const hora = new Date().toLocaleTimeString();
+            const ahora = new Date();
+            const horaString = ahora.getHours() + ":" + ahora.getMinutes().toString().padStart(2, '0');
+            
             const payload = {};
-            payload[selectedUser.colEntry] = hora;
+            payload[selectedUser.colEntry] = horaString;
 
             try {
-                // IMPORTANTE: SheetDB usa el nombre de la columna para buscar la fila
                 const response = await fetch(`${API_URL}/${selectedUser.colId}/${selectedUser.id}`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
@@ -146,21 +167,23 @@
                 });
 
                 if (response.ok) {
-                    alert("¡Registrado!");
+                    alert("¡Bienvenido/a, " + selectedUser.nombre + "!");
+                    document.getElementById('info-box').style.display = 'none';
+                    await cargarDatos(); // Actualiza contadores
                     reiniciar();
-                    cargarDatos();
                 } else {
                     throw new Error("Error en servidor");
                 }
             } catch (e) {
-                alert("Error al guardar: " + e.message);
+                alert("Error al guardar: Intenta de nuevo.");
                 btn.disabled = false;
-                btn.innerText = "CONFIRMAR ENTRADA";
+                btn.innerText = "✅ CONFIRMAR ENTRADA";
             }
         }
 
         function reiniciar() {
             document.getElementById('info-box').style.display = 'none';
+            selectedUser = null;
             if (html5QrCode) html5QrCode.resume();
         }
 
