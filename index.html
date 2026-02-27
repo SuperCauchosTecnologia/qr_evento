@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Scanner Evento Final</title>
+    <title>Scanner Evento - Final Check</title>
     <script src="https://unpkg.com/html5-qrcode"></script>
     <style>
         :root { --p: #2563eb; --s: #16a34a; --bg: #f3f4f6; }
@@ -16,7 +16,7 @@
         #btn-scan { background: var(--p); color: white; }
         #btn-validar { background: var(--s); color: white; display: none; }
         .info-res { display: none; margin-top: 15px; text-align: left; border-top: 2px solid #eee; padding-top: 15px; }
-        #msg-buscando { display: none; color: #666; font-weight: bold; margin-top: 10px; }
+        #debug-info { font-size: 10px; color: #ccc; margin-top: 20px; }
     </style>
 </head>
 <body>
@@ -31,7 +31,6 @@
     </div>
 
     <div id="reader"></div>
-    <div id="msg-buscando">🔍 Buscando en la base de datos...</div>
 
     <div id="info-box" class="card info-res">
         <h3 id="u-nombre" style="margin:0; color: #111;"></h3>
@@ -39,33 +38,46 @@
         <button id="btn-validar" class="btn" onclick="validarIngreso()">✅ CONFIRMAR ENTRADA</button>
     </div>
 
+    <div id="debug-info">Esperando conexión con la API...</div>
+
     <script>
+        // TU NUEVA API ACTUALIZADA
         const API_URL = "https://sheetdb.io/api/v1/mhk3qdwz57vyk";
         let html5QrCode;
         let selectedUser = null;
 
-        async function cargarStats() {
+        async function cargarDatos() {
             try {
                 const r = await fetch(API_URL);
                 const data = await r.json();
-                let llegaron = 0, total = 0;
+                console.log("Datos recibidos:", data); // Ver en consola
                 
-                data.forEach(row => {
-                    if(row.ID1 && row.ID1.toString().trim() !== "") { 
-                        total++; 
-                        if(row.ENTRADA1 && row.ENTRADA1.toString().trim() !== "") llegaron++; 
+                if (!Array.isArray(data)) throw new Error("La API no devolvió una lista");
+
+                let llegaron = 0;
+                let total = 0;
+
+                data.forEach((row, index) => {
+                    // Verificamos ID1 (Columna A)
+                    if (row.ID1 && row.ID1.toString().trim() !== "") {
+                        total++;
+                        if (row.ENTRADA1 && row.ENTRADA1.toString().trim() !== "") llegaron++;
                     }
-                    if(row.ID2 && row.ID2.toString().trim() !== "") { 
-                        total++; 
-                        if(row.ENTRADA2 && row.ENTRADA2.toString().trim() !== "") llegaron++; 
+                    // Verificamos ID2 (Columna E)
+                    if (row.ID2 && row.ID2.toString().trim() !== "") {
+                        total++;
+                        if (row.ENTRADA2 && row.ENTRADA2.toString().trim() !== "") llegaron++;
                     }
                 });
-                
+
                 document.getElementById('txt-llegaron').innerText = llegaron;
                 document.getElementById('txt-pendientes').innerText = total - llegaron;
+                document.getElementById('debug-info').innerText = "Conectado. Total IDs detectados: " + total;
+                
                 return data;
-            } catch(e) {
-                console.error("Error al conectar con SheetDB:", e);
+            } catch (e) {
+                console.error("Error:", e);
+                document.getElementById('debug-info').innerText = "Error de conexión: " + e.message;
                 return null;
             }
         }
@@ -75,52 +87,43 @@
             html5QrCode = new Html5Qrcode("reader");
             html5QrCode.start(
                 { facingMode: "environment" }, 
-                { fps: 10, qrbox: {width: 250, height: 250} }, 
+                { fps: 10, qrbox: 250 }, 
                 onScanSuccess
             ).catch(err => alert("Error de cámara: " + err));
-            cargarStats();
+            cargarDatos();
         }
 
         async function onScanSuccess(decodedText) {
-            // 1. Pausar y mostrar estado
             html5QrCode.pause(true);
-            document.getElementById('msg-buscando').style.display = 'block';
-            document.getElementById('info-box').style.display = 'none';
-
             const idEscaneado = decodedText.trim();
-            const data = await cargarStats();
+            const data = await cargarDatos();
 
-            if (!data) {
-                alert("Error: No se pudo conectar con la base de datos.");
-                reiniciar();
-                return;
-            }
+            if (!data) { reiniciar(); return; }
 
             let user = null;
 
-            // 2. Buscar ID en las dos columnas posibles
+            // Buscamos en los datos
             for (let row of data) {
+                // Buscamos en ID1
                 if (row.ID1 && row.ID1.toString().trim() === idEscaneado) {
                     user = { id: idEscaneado, nombre: row.USUARIO1, tipo: row.TIPO1, colId: 'ID1', colEntry: 'ENTRADA1' };
                     break;
                 }
+                // Buscamos en ID2
                 if (row.ID2 && row.ID2.toString().trim() === idEscaneado) {
                     user = { id: idEscaneado, nombre: row.USUARIO2, tipo: row.TIPO2, colId: 'ID2', colEntry: 'ENTRADA2' };
                     break;
                 }
             }
 
-            // 3. Mostrar resultados
-            document.getElementById('msg-buscando').style.display = 'none';
-
             if (user) {
                 selectedUser = user;
                 document.getElementById('info-box').style.display = 'block';
-                document.getElementById('u-nombre').innerText = user.nombre || "Invitado sin nombre";
-                document.getElementById('u-tipo').innerText = "Tipo: " + (user.tipo || "General");
+                document.getElementById('u-nombre').innerText = user.nombre || "Sin nombre";
+                document.getElementById('u-tipo').innerText = "Cat: " + (user.tipo || "General");
                 document.getElementById('btn-validar').style.display = 'block';
             } else {
-                alert("ID: " + idEscaneado + " no encontrado en el archivo.");
+                alert("El ID [" + idEscaneado + "] no existe en el Excel.");
                 reiniciar();
             }
         }
@@ -128,15 +131,14 @@
         async function validarIngreso() {
             const btn = document.getElementById('btn-validar');
             btn.disabled = true;
-            btn.innerText = "💾 GUARDANDO...";
+            btn.innerText = "REGISTRANDO...";
 
-            // Formato de hora HH:MM:SS
-            const ahora = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-            
+            const hora = new Date().toLocaleTimeString();
             const payload = {};
-            payload[selectedUser.colEntry] = ahora;
+            payload[selectedUser.colEntry] = hora;
 
             try {
+                // IMPORTANTE: SheetDB usa el nombre de la columna para buscar la fila
                 const response = await fetch(`${API_URL}/${selectedUser.colId}/${selectedUser.id}`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
@@ -144,29 +146,26 @@
                 });
 
                 if (response.ok) {
-                    alert("✅ Entrada registrada para: " + selectedUser.nombre);
-                    document.getElementById('info-box').style.display = 'none';
-                    await cargarStats();
+                    alert("¡Registrado!");
                     reiniciar();
+                    cargarDatos();
                 } else {
-                    throw new Error("Respuesta servidor no OK");
+                    throw new Error("Error en servidor");
                 }
             } catch (e) {
-                alert("❌ Error al guardar. Revisa que la columna " + selectedUser.colEntry + " exista.");
+                alert("Error al guardar: " + e.message);
                 btn.disabled = false;
-                btn.innerText = "✅ CONFIRMAR ENTRADA";
+                btn.innerText = "CONFIRMAR ENTRADA";
             }
         }
 
         function reiniciar() {
-            document.getElementById('msg-buscando').style.display = 'none';
             document.getElementById('info-box').style.display = 'none';
-            selectedUser = null;
             if (html5QrCode) html5QrCode.resume();
         }
 
-        // Carga inicial de contadores
-        cargarStats();
+        // Carga inicial
+        cargarDatos();
     </script>
 </body>
 </html>
