@@ -3,26 +3,29 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Check-in Evento</title>
+    <title>Scanner Pro Evento</title>
     <script src="https://unpkg.com/html5-qrcode"></script>
     <style>
         :root { --p: #2563eb; --s: #16a34a; --err: #dc2626; --bg: #f3f4f6; }
-        body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); margin: 0; padding: 15px; text-align: center; }
-        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); margin-bottom: 15px; }
+        body { font-family: system-ui, sans-serif; background: var(--bg); margin: 0; padding: 15px; text-align: center; }
+        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 15px; }
+        #status-api { font-size: 12px; margin-bottom: 10px; font-weight: bold; }
+        .online { color: var(--s); } .offline { color: var(--err); }
         #reader { width: 100%; max-width: 400px; margin: 0 auto; border-radius: 12px; overflow: hidden; background: #000; }
         .stats { display: flex; justify-content: space-around; margin: 15px 0; }
         .stat-num { display: block; font-size: 24px; font-weight: bold; color: var(--p); }
-        .btn { border: none; padding: 16px; border-radius: 8px; font-weight: bold; cursor: pointer; width: 100%; font-size: 16px; margin-top: 10px; transition: 0.2s; }
+        .btn { border: none; padding: 16px; border-radius: 8px; font-weight: bold; cursor: pointer; width: 100%; font-size: 16px; margin-top: 10px; }
         #btn-scan { background: var(--p); color: white; }
         #btn-validar { background: var(--s); color: white; display: none; }
         .info-res { display: none; margin-top: 15px; text-align: left; border-top: 1px solid #eee; padding-top: 15px; }
-        .loading { color: #666; font-style: italic; }
+        .badge { background: #eee; padding: 4px 8px; border-radius: 4px; font-size: 12px; }
     </style>
 </head>
 <body>
 
     <div class="card">
-        <h2>Registro de Invitados</h2>
+        <div id="status-api">Conectando a la base de datos...</div>
+        <h2>Control de Acceso</h2>
         <div class="stats">
             <div>Llegaron <span id="txt-llegaron" class="stat-num">0</span></div>
             <div>Pendientes <span id="txt-pendientes" class="stat-num">0</span></div>
@@ -33,97 +36,143 @@
     <div id="reader"></div>
 
     <div id="info-box" class="card info-res">
-        <h3 id="u-nombre" style="margin:0"></h3>
-        <p id="u-tipo" style="color:#666; margin:5px 0"></p>
+        <span class="badge" id="u-lista"></span>
+        <h3 id="u-nombre" style="margin:10px 0 5px 0"></h3>
+        <p id="u-tipo" style="color:#666; margin:0 0 15px 0"></p>
         <button id="btn-validar" class="btn" onclick="validarIngreso()">CONFIRMAR ENTRADA</button>
     </div>
 
     <script>
-        const API_URL = "https://sheetdb.io/api/v1/gz78mhnzc3tou"; // <--- PEGA AQUÍ TU URL DE SHEETDB
+        const API_URL = "TU_API_URL_AQUÍ"; // <--- PEGA TU URL DE SHEETDB AQUÍ
         let html5QrCode;
         let selectedUser = null;
 
-        async function obtenerStats() {
+        // 1. Validar conexión y obtener contadores
+        async function checkConexionYStats() {
+            const statusDiv = document.getElementById('status-api');
             try {
                 const r = await fetch(API_URL);
+                if (!r.ok) throw new Error();
                 const data = await r.json();
-                let llegaron = 0, total = 0;
+                
+                statusDiv.innerText = "● SISTEMA ONLINE";
+                statusDiv.className = "online";
+
+                let llegaron = 0;
+                let totalInvitados = 0;
+
                 data.forEach(row => {
-                    if(row.ID1) { total++; if(row.ENTRADA1) llegaron++; }
-                    if(row.ID2) { total++; if(row.ENTRADA2) llegaron++; }
+                    // Contar Invitados en Columna A
+                    if (row.ID1 && row.ID1.toString().trim() !== "") {
+                        totalInvitados++;
+                        if (row.ENTRADA1) llegaron++;
+                    }
+                    // Contar Invitados en Columna E
+                    if (row.ID2 && row.ID2.toString().trim() !== "") {
+                        totalInvitados++;
+                        if (row.ENTRADA2) llegaron++;
+                    }
                 });
+
                 document.getElementById('txt-llegaron').innerText = llegaron;
-                document.getElementById('txt-pendientes').innerText = total - llegaron;
-            } catch(e) { console.error("Error stats", e); }
+                document.getElementById('txt-pendientes').innerText = totalInvitados - llegaron;
+            } catch (e) {
+                statusDiv.innerText = "● ERROR DE CONEXIÓN";
+                statusDiv.className = "offline";
+            }
         }
 
         function iniciarCamara() {
             document.getElementById('btn-scan').style.display = 'none';
             html5QrCode = new Html5Qrcode("reader");
-            html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, onScanSuccess);
-            obtenerStats();
+            html5QrCode.start(
+                { facingMode: "environment" }, 
+                { fps: 10, qrbox: 250 }, 
+                onScanSuccess
+            ).catch(err => alert("Error cámara: " + err));
+            checkConexionYStats();
         }
 
         async function onScanSuccess(decodedText) {
             html5QrCode.pause(true);
             const infoBox = document.getElementById('info-box');
-            const uNombre = document.getElementById('u-nombre');
             infoBox.style.display = 'block';
-            uNombre.innerText = "Buscando...";
+            document.getElementById('u-nombre').innerText = "Buscando ID...";
+            document.getElementById('btn-validar').style.display = 'none';
             
             try {
-                // Buscamos en ambas columnas usando el filtro de SheetDB
-                const [r1, r2] = await Promise.all([
-                    fetch(`${API_URL}/search?ID1=${decodedText}`).then(r => r.json()),
-                    fetch(`${API_URL}/search?ID2=${decodedText}`).then(r => r.json())
-                ]);
+                // Buscamos en toda la hoja
+                const r = await fetch(API_URL);
+                const data = await r.json();
+                
+                let userFound = null;
 
-                if (r1.length > 0) {
-                    prepararValidacion(r1[0], 'ID1', 'ENTRADA1');
-                } else if (r2.length > 0) {
-                    prepararValidacion(r2[0], 'ID2', 'ENTRADA2');
-                } else {
-                    uNombre.innerHTML = "<span style='color:red'>NO ENCONTRADO</span>";
-                    setTimeout(reiniciar, 2000);
+                // Buscar el ID en ambas columnas (ID1 o ID2)
+                for (let row of data) {
+                    if (row.ID1 && row.ID1.toString() === decodedText) {
+                        userFound = { ...row, lista: 'LISTA A', colId: 'ID1', colEntry: 'ENTRADA1', nombre: row.USUARIO1, tipo: row.TIPO1, idValue: row.ID1 };
+                        break;
+                    }
+                    if (row.ID2 && row.ID2.toString() === decodedText) {
+                        userFound = { ...row, lista: 'LISTA B', colId: 'ID2', colEntry: 'ENTRADA2', nombre: row.USUARIO2, tipo: row.TIPO2, idValue: row.ID2 };
+                        break;
+                    }
                 }
-            } catch (e) { alert("Error de red"); reiniciar(); }
-        }
 
-        function prepararValidacion(user, idCol, entryCol) {
-            selectedUser = { id: user[idCol], col: idCol, entry: entryCol };
-            document.getElementById('u-nombre').innerText = user[idCol === 'ID1' ? 'USUARIO1' : 'USUARIO2'];
-            document.getElementById('u-tipo').innerText = "Tipo: " + user[idCol === 'ID1' ? 'TIPO1' : 'TIPO2'];
-            document.getElementById('btn-validar').style.display = 'block';
+                if (userFound) {
+                    selectedUser = userFound;
+                    document.getElementById('u-lista').innerText = userFound.lista;
+                    document.getElementById('u-nombre').innerText = userFound.nombre || "Sin Nombre";
+                    document.getElementById('u-tipo').innerText = "Tipo: " + (userFound.tipo || "General");
+                    document.getElementById('btn-validar').style.display = 'block';
+                } else {
+                    document.getElementById('u-nombre').innerHTML = "<span style='color:red'>ID NO REGISTRADO</span>";
+                    setTimeout(reiniciar, 3000);
+                }
+            } catch (e) {
+                alert("Error al consultar datos");
+                reiniciar();
+            }
         }
 
         async function validarIngreso() {
             const btn = document.getElementById('btn-validar');
-            btn.disabled = true; btn.innerText = "REGISTRANDO...";
+            btn.disabled = true;
+            btn.innerText = "GUARDANDO...";
             
-            const payload = {};
-            payload[selectedUser.entry] = new Date().toLocaleString();
+            const dataUpdate = {};
+            dataUpdate[selectedUser.colEntry] = new Date().toLocaleString();
 
             try {
-                await fetch(`${API_URL}/${selectedUser.col}/${selectedUser.id}`, {
+                // Actualizamos la fila usando el ID encontrado como referencia
+                const response = await fetch(`${API_URL}/${selectedUser.colId}/${selectedUser.idValue}`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ data: [payload] })
+                    body: JSON.stringify({ data: [dataUpdate] })
                 });
-                alert("✅ Registrado con éxito");
-                obtenerStats();
-                reiniciar();
-            } catch (e) { alert("Error al guardar"); btn.disabled = false; }
+
+                if(response.ok) {
+                    alert("¡Bienvenido/a " + selectedUser.nombre + "!");
+                    await checkConexionYStats(); // Actualizar contadores
+                    reiniciar();
+                } else {
+                    throw new Error();
+                }
+            } catch (e) {
+                alert("Error al registrar entrada");
+                btn.disabled = false;
+                btn.innerText = "CONFIRMAR ENTRADA";
+            }
         }
 
         function reiniciar() {
             document.getElementById('info-box').style.display = 'none';
-            document.getElementById('btn-validar').style.display = 'none';
-            document.getElementById('btn-validar').disabled = false;
-            document.getElementById('btn-validar').innerText = "CONFIRMAR ENTRADA";
+            selectedUser = null;
             html5QrCode.resume();
         }
 
-        obtenerStats();
+        // Ejecutar al cargar la página
+        checkConexionYStats();
     </script>
 </body>
 </html>
