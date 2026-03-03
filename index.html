@@ -3,148 +3,61 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Scanner Pro - Sin Columna ID</title>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <title>Scanner Real-Time</title>
     <script src="https://unpkg.com/html5-qrcode"></script>
     <style>
-        :root { --p: #2563eb; --s: #16a34a; --err: #dc2626; --bg: #f3f4f6; }
-        body { font-family: sans-serif; background: var(--bg); margin: 0; padding: 15px; text-align: center; }
-        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 15px; }
-        .stat-num { font-size: 26px; font-weight: bold; color: var(--p); }
-        #reader { width: 100%; max-width: 400px; margin: 0 auto; border-radius: 12px; overflow: hidden; background: #000; min-height: 250px; }
-        .btn { border: none; padding: 18px; border-radius: 8px; font-weight: bold; cursor: pointer; width: 100%; font-size: 16px; margin-top: 10px; }
-        .ya-ingreso { color: var(--err); background: #fee2e2; padding: 10px; border-radius: 8px; display: block; border: 1px solid #f87171; margin-bottom: 10px; }
+        body { font-family: sans-serif; text-align: center; background: #f0f2f5; padding: 20px; }
+        #reader { width: 100%; max-width: 400px; margin: auto; border-radius: 10px; overflow: hidden; }
+        .card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-top: 20px; display:none; }
+        .btn { padding: 15px; width: 100%; background: #2563eb; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; }
+        .msg { font-weight: bold; padding: 10px; border-radius: 5px; margin-top: 10px; }
     </style>
 </head>
 <body>
-
-    <div class="card">
-        <h2>Control de Acceso</h2>
-        <div style="display:flex; justify-content:space-around;">
-            <div>Entraron <br><span id="txt-llegaron" class="stat-num">0</span></div>
-            <div>Faltan <br><span id="txt-pendientes" class="stat-num">0</span></div>
-        </div>
-        <button id="btn-scan" class="btn" style="background:var(--p); color:white" onclick="iniciarCamara()">📷 ABRIR CÁMARA</button>
-    </div>
-
+    <h2>Control de Acceso Real-Time</h2>
     <div id="reader"></div>
-
-    <div id="info-box" class="card" style="display:none; text-align:left;">
-        <h3 id="u-nombre" style="margin-top:0;"></h3>
-        <p id="u-tipo" style="color: #666;"></p>
-        <div id="msg-repetido"></div>
-        <button id="btn-validar" class="btn" style="background:var(--s); color:white" onclick="validarIngreso()">✅ CONFIRMAR ENTRADA</button>
-        <button class="btn" style="background:#eee; color:#333;" onclick="reiniciar()">CANCELAR</button>
+    <div id="info" class="card">
+        <h3 id="nombre"></h3>
+        <div id="resultado" class="msg"></div>
     </div>
-
-    <div id="debug" style="font-size:10px; color:#999; margin-top:15px;">Conectando...</div>
 
     <script>
-        const S_URL = "https://hrcxyidcoarwnuosjihl.supabase.co";
-        const S_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhyY3h5aWRjb2Fyd251b3NqaWhsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1NjA1NzcsImV4cCI6MjA4ODEzNjU3N30.xL3JGEcyMHeGdFpMhvjHCf5Z6ZS4GJUa_5r2JAhV888";
-        const _sb = supabase.createClient(S_URL, S_KEY);
+        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwIYzk9vhfI8l9i2v9cYe2Zjq-k8T7KjbJ2XKz8ELfsH8DD_SJNWJXTQA46-TU0CpAZ/exec";
+        const html5QrCode = new Html5Qrcode("reader");
 
-        let html5QrCode, lastScan, slotActivo;
+        html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, onScanSuccess);
 
-        async function cargar() {
-            try {
-                const { data, error } = await _sb.from('asistencia').select('*');
-                if (error) throw error;
-                
-                let inCount = 0, total = 0;
-                data.forEach(r => {
-                    if(r.ID1) { total++; if(r.ENTRADA1) inCount++; }
-                    if(r.ID2) { total++; if(r.ENTRADA2) inCount++; }
-                });
-                document.getElementById('txt-llegaron').innerText = inCount;
-                document.getElementById('txt-pendientes').innerText = total - inCount;
-                document.getElementById('debug').innerText = "Sincronizado: " + data.length + " filas.";
-            } catch (e) {
-                document.getElementById('debug').innerText = "Error: " + e.message;
-            }
-        }
-
-        async function onScan(txt) {
+        async function onScanSuccess(decodedText) {
             html5QrCode.pause(true);
-            lastScan = txt.trim();
-            
-            // Buscamos la fila comparando el texto escaneado con ID1 o ID2
-            const { data, error } = await _sb.from('asistencia')
-                .select('*')
-                .or(`ID1.eq."${lastScan}",ID2.eq."${lastScan}"`)
-                .maybeSingle();
-
-            if (!data) { 
-                alert("Código " + lastScan + " no encontrado en la lista."); 
-                reiniciar(); 
-                return; 
-            }
-            
-            // Identificar si el QR es del Invitado 1 o 2
-            slotActivo = (data.ID1 == lastScan) ? 1 : 2;
-            
-            const nombre = data[`USUARIO${slotActivo}`] || "Sin nombre";
-            const tipo = data[`TIPO${slotActivo}`] || "General";
-            const entrada = data[`ENTRADA${slotActivo}`];
-
-            document.getElementById('info-box').style.display = 'block';
-            document.getElementById('u-nombre').innerText = nombre;
-            document.getElementById('u-tipo').innerText = "Categoría: " + tipo;
-
-            if (entrada) {
-                document.getElementById('msg-repetido').innerHTML = `<span class="ya-ingreso">⚠️ YA INGRESÓ<br><small>Hora: ${entrada}</small></span>`;
-                document.getElementById('btn-validar').style.display = 'none';
-            } else {
-                document.getElementById('msg-repetido').innerHTML = "";
-                document.getElementById('btn-validar').style.display = 'block';
-            }
-        }
-
-        async function validarIngreso() {
-            const btn = document.getElementById('btn-validar');
-            btn.innerText = "REGISTRANDO...";
-            btn.disabled = true;
-
-            const hora = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-            
-            // Creamos el objeto de actualización dinámico
-            let updateObj = {};
-            updateObj[`ENTRADA${slotActivo}`] = hora;
-
-            // Filtramos la actualización usando la misma columna que escaneamos
-            const columnaFiltro = (slotActivo === 1) ? 'ID1' : 'ID2';
+            document.getElementById('info').style.display = 'block';
+            document.getElementById('nombre').innerText = "Validando...";
+            document.getElementById('resultado').innerText = "Consultando base de datos...";
 
             try {
-                const { error } = await _sb.from('asistencia')
-                    .update(updateObj)
-                    .eq(columnaFiltro, lastScan);
+                const response = await fetch(`${SCRIPT_URL}?id=${decodedText.trim()}`);
+                const res = await response.text();
+                const [status, nombre, hora] = res.split('|');
 
-                if(error) throw error;
-
-                alert("¡Acceso Confirmado!");
-                await cargar();
-                reiniciar();
+                if (status === "EXITO") {
+                    document.getElementById('nombre').innerText = "✅ " + nombre;
+                    document.getElementById('resultado').innerText = "¡BIENVENIDO!";
+                    document.getElementById('resultado').style.background = "#dcfce7";
+                } else if (status === "YA_INGRESO") {
+                    document.getElementById('nombre').innerText = "⚠️ " + nombre;
+                    document.getElementById('resultado').innerText = "YA INGRESÓ A LAS " + hora;
+                    document.getElementById('resultado').style.background = "#fee2e2";
+                } else {
+                    alert("ID NO ENCONTRADO");
+                }
             } catch (e) {
-                alert("Error al guardar: " + e.message);
-                btn.disabled = false;
-                btn.innerText = "CONFIRMAR ENTRADA";
+                alert("Error de conexión");
             }
+            
+            setTimeout(() => {
+                document.getElementById('info').style.display = 'none';
+                html5QrCode.resume();
+            }, 3000);
         }
-
-        function reiniciar() {
-            document.getElementById('info-box').style.display = 'none';
-            if(html5QrCode) html5QrCode.resume();
-        }
-
-        function iniciarCamara() {
-            document.getElementById('btn-scan').style.display = 'none';
-            html5QrCode = new Html5Qrcode("reader");
-            html5QrCode.start({ facingMode: "environment" }, { fps: 12, qrbox: 250 }, onScan)
-            .catch(err => alert("Error cámara: " + err));
-            cargar();
-        }
-
-        cargar();
     </script>
 </body>
 </html>
