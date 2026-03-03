@@ -3,61 +3,164 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Scanner Real-Time</title>
+    <title>Scanner Evento - Control de Acceso</title>
     <script src="https://unpkg.com/html5-qrcode"></script>
     <style>
-        body { font-family: sans-serif; text-align: center; background: #f0f2f5; padding: 20px; }
-        #reader { width: 100%; max-width: 400px; margin: auto; border-radius: 10px; overflow: hidden; }
-        .card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-top: 20px; display:none; }
-        .btn { padding: 15px; width: 100%; background: #2563eb; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; }
-        .msg { font-weight: bold; padding: 10px; border-radius: 5px; margin-top: 10px; }
+        :root { --p: #2563eb; --s: #16a34a; --err: #dc2626; --bg: #f3f4f6; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); margin: 0; padding: 15px; text-align: center; }
+        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 15px; }
+        .stats { display: flex; justify-content: space-around; margin: 15px 0; }
+        .stat-num { display: block; font-size: 26px; font-weight: bold; color: var(--p); }
+        #reader { width: 100%; max-width: 400px; margin: 0 auto; border-radius: 12px; overflow: hidden; background: #000; min-height: 250px; }
+        .btn { border: none; padding: 18px; border-radius: 8px; font-weight: bold; cursor: pointer; width: 100%; font-size: 16px; margin-top: 10px; transition: 0.3s; }
+        #btn-scan { background: var(--p); color: white; }
+        #btn-validar { background: var(--s); color: white; display: none; }
+        .info-res { display: none; margin-top: 15px; text-align: left; border-top: 3px solid #eee; padding-top: 15px; }
+        .ya-ingreso { color: var(--err); font-weight: bold; background: #fee2e2; padding: 10px; border-radius: 8px; margin-top: 10px; display: block; border: 1px solid #f87171; }
+        #debug-info { font-size: 11px; color: #999; margin-top: 20px; }
     </style>
 </head>
 <body>
-    <h2>Control de Acceso Real-Time</h2>
-    <div id="reader"></div>
-    <div id="info" class="card">
-        <h3 id="nombre"></h3>
-        <div id="resultado" class="msg"></div>
+
+    <div class="card">
+        <h2>Acceso al Evento</h2>
+        <div class="stats">
+            <div>Llegaron <span id="txt-llegaron" class="stat-num">0</span></div>
+            <div>Pendientes <span id="txt-pendientes" class="stat-num">0</span></div>
+        </div>
+        <button id="btn-scan" class="btn" onclick="iniciarCamara()">📷 ABRIR CÁMARA</button>
     </div>
 
-    <script>
-        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwIYzk9vhfI8l9i2v9cYe2Zjq-k8T7KjbJ2XKz8ELfsH8DD_SJNWJXTQA46-TU0CpAZ/exec";
-        const html5QrCode = new Html5Qrcode("reader");
+    <div id="reader"></div>
 
-        html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, onScanSuccess);
+    <div id="info-box" class="card info-res">
+        <h3 id="u-nombre" style="margin:0; color: #111;"></h3>
+        <p id="u-tipo" style="color:#666; margin: 5px 0 10px 0;"></p>
+        <div id="msg-repetido"></div>
+        <button id="btn-validar" class="btn" onclick="validarIngreso()">✅ CONFIRMAR ENTRADA</button>
+    </div>
+
+    <div id="debug-info">Conectando con Google Sheets...</div>
+
+    <script>
+        // PEGA AQUÍ TU URL DE GOOGLE APPS SCRIPT
+        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw9l28PJJNrm7ZpqOs_8V61UsTzW4JnQaOP1uWVDAgJj6J8hsVvitejrT-mNrmzDiHK/exec";
+        
+        let html5QrCode;
+        let selectedUser = null;
+
+        async function cargarDatos() {
+            try {
+                const r = await fetch(`${SCRIPT_URL}?action=read`);
+                const data = await r.json();
+                
+                let llegaron = 0;
+                let total = 0;
+
+                data.forEach(row => {
+                    if (row.ID1 && row.ID1.toString().trim() !== "") {
+                        total++;
+                        if (row.ENTRADA1 && row.ENTRADA1.toString().trim() !== "") llegaron++;
+                    }
+                    if (row.ID2 && row.ID2.toString().trim() !== "") {
+                        total++;
+                        if (row.ENTRADA2 && row.ENTRADA2.toString().trim() !== "") llegaron++;
+                    }
+                });
+
+                document.getElementById('txt-llegaron').innerText = llegaron;
+                document.getElementById('txt-pendientes').innerText = (total - llegaron);
+                document.getElementById('debug-info').innerText = "Sincronizado. Invitados: " + total;
+                return data;
+            } catch (e) {
+                document.getElementById('debug-info').innerText = "Error de conexión con Google.";
+                return null;
+            }
+        }
+
+        function iniciarCamara() {
+            document.getElementById('btn-scan').style.display = 'none';
+            html5QrCode = new Html5Qrcode("reader");
+            html5QrCode.start({ facingMode: "environment" }, { fps: 15, qrbox: 250 }, onScanSuccess);
+            cargarDatos();
+        }
 
         async function onScanSuccess(decodedText) {
             html5QrCode.pause(true);
-            document.getElementById('info').style.display = 'block';
-            document.getElementById('nombre').innerText = "Validando...";
-            document.getElementById('resultado').innerText = "Consultando base de datos...";
+            const idEscaneado = decodedText.trim();
+            document.getElementById('debug-info').innerText = "Buscando ID...";
+            
+            const data = await cargarDatos();
+            if (!data) { reiniciar(); return; }
+
+            let user = null;
+            let yaEntro = false;
+            let horaEntrada = "";
+
+            for (let row of data) {
+                if (row.ID1 && row.ID1.toString().trim() === idEscaneado) {
+                    user = { id: idEscaneado, nombre: row.USUARIO1, tipo: row.TIPO1, colEntry: 'ENTRADA1' };
+                    if (row.ENTRADA1) { yaEntro = true; horaEntrada = row.ENTRADA1; }
+                    break;
+                }
+                if (row.ID2 && row.ID2.toString().trim() === idEscaneado) {
+                    user = { id: idEscaneado, nombre: row.USUARIO2, tipo: row.TIPO2, colEntry: 'ENTRADA2' };
+                    if (row.ENTRADA2) { yaEntro = true; horaEntrada = row.ENTRADA2; }
+                    break;
+                }
+            }
+
+            if (user) {
+                selectedUser = user;
+                document.getElementById('info-box').style.display = 'block';
+                document.getElementById('u-nombre').innerText = user.nombre || "Invitado";
+                document.getElementById('u-tipo').innerText = "Categoría: " + (user.tipo || "General");
+
+                if (yaEntro) {
+                    document.getElementById('msg-repetido').innerHTML = `<span class="ya-ingreso">⚠️ YA INGRESÓ<br><small>Hora: ${horaEntrada}</small></span>`;
+                    document.getElementById('btn-validar').style.display = 'none';
+                    setTimeout(reiniciar, 4000);
+                } else {
+                    document.getElementById('msg-repetido').innerHTML = "";
+                    document.getElementById('btn-validar').style.display = 'block';
+                }
+            } else {
+                alert("ID: " + idEscaneado + " NO ENCONTRADO.");
+                reiniciar();
+            }
+        }
+
+        async function validarIngreso() {
+            const btn = document.getElementById('btn-validar');
+            btn.disabled = true;
+            btn.innerText = "⏳ REGISTRANDO...";
+
+            const ahora = new Date();
+            const horaString = ahora.getHours() + ":" + ahora.getMinutes().toString().padStart(2, '0');
 
             try {
-                const response = await fetch(`${SCRIPT_URL}?id=${decodedText.trim()}`);
-                const res = await response.text();
-                const [status, nombre, hora] = res.split('|');
+                const url = `${SCRIPT_URL}?action=update&id=${selectedUser.id}&colEntry=${selectedUser.colEntry}&hora=${horaString}`;
+                const response = await fetch(url);
+                const result = await response.text();
 
-                if (status === "EXITO") {
-                    document.getElementById('nombre').innerText = "✅ " + nombre;
-                    document.getElementById('resultado').innerText = "¡BIENVENIDO!";
-                    document.getElementById('resultado').style.background = "#dcfce7";
-                } else if (status === "YA_INGRESO") {
-                    document.getElementById('nombre').innerText = "⚠️ " + nombre;
-                    document.getElementById('resultado').innerText = "YA INGRESÓ A LAS " + hora;
-                    document.getElementById('resultado').style.background = "#fee2e2";
-                } else {
-                    alert("ID NO ENCONTRADO");
-                }
+                if (result === "SUCCESS") {
+                    alert("¡Bienvenido/a!");
+                    await cargarDatos();
+                    reiniciar();
+                } else { throw new Error(); }
             } catch (e) {
-                alert("Error de conexión");
+                alert("Error al guardar. Verifica tu conexión.");
+                btn.disabled = false;
+                btn.innerText = "✅ CONFIRMAR ENTRADA";
             }
-            
-            setTimeout(() => {
-                document.getElementById('info').style.display = 'none';
-                html5QrCode.resume();
-            }, 3000);
         }
+
+        function reiniciar() {
+            document.getElementById('info-box').style.display = 'none';
+            if (html5QrCode) html5QrCode.resume();
+        }
+
+        cargarDatos();
     </script>
 </body>
 </html>
