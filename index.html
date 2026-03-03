@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Scanner Evento - Control de Acceso</title>
+    <title>Scanner Pro - Supabase</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://unpkg.com/html5-qrcode"></script>
     <style>
         :root { --p: #2563eb; --s: #16a34a; --err: #dc2626; --bg: #f3f4f6; }
@@ -40,42 +41,32 @@
         <button id="btn-validar" class="btn" onclick="validarIngreso()">✅ CONFIRMAR ENTRADA</button>
     </div>
 
-    <div id="debug-info">Cargando base de datos...</div>
+    <div id="debug-info">Cargando Supabase...</div>
 
     <script>
-        const API_URL = "https://sheetdb.io/api/v1/mhk3qdwz57vyk";
+        const SUPABASE_URL = "https://hrcxyidcoarwnuosjihl.supabase.co";
+        const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhyY3h5aWRjb2Fyd251b3NqaWhsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1NjA1NzcsImV4cCI6MjA4ODEzNjU3N30.xL3JGEcyMHeGdFpMhvjHCf5Z6ZS4GJUa_5r2JAhV888";
+        
+        const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
         let html5QrCode;
         let selectedUser = null;
 
-        // Carga de datos y contadores
         async function cargarDatos() {
             try {
-                const r = await fetch(API_URL);
-                const data = await r.json();
-                
-                let llegaron = 0;
-                let total = 0;
+                const { data, error } = await _supabase.from('asistencia').select('*');
+                if (error) throw error;
 
-                data.forEach(row => {
-                    // Contar Grupo 1
-                    if (row.ID1 && row.ID1.toString().trim() !== "") {
-                        total++;
-                        if (row.ENTRADA1 && row.ENTRADA1.toString().trim() !== "") llegaron++;
-                    }
-                    // Contar Grupo 2
-                    if (row.ID2 && row.ID2.toString().trim() !== "") {
-                        total++;
-                        if (row.ENTRADA2 && row.ENTRADA2.toString().trim() !== "") llegaron++;
-                    }
-                });
+                const llegaron = data.filter(r => r.entrada).length;
+                const total = data.length;
 
                 document.getElementById('txt-llegaron').innerText = llegaron;
                 document.getElementById('txt-pendientes').innerText = (total - llegaron);
-                document.getElementById('debug-info').innerText = "Conectado. Total Invitados: " + total;
+                document.getElementById('debug-info').innerText = `Sync OK. Invitados: ${total}`;
                 return data;
             } catch (e) {
-                document.getElementById('debug-info').innerText = "Error de red: No se pudo conectar.";
-                return null;
+                document.getElementById('debug-info').innerText = "Error de conexión.";
+                console.error(e);
             }
         }
 
@@ -86,65 +77,46 @@
                 { facingMode: "environment" }, 
                 { fps: 15, qrbox: 250 }, 
                 onScanSuccess
-            ).catch(err => alert("Error de cámara: " + err));
+            ).catch(err => alert("Error cámara: " + err));
             cargarDatos();
         }
 
         async function onScanSuccess(decodedText) {
             html5QrCode.pause(true);
             const idEscaneado = decodedText.trim();
-            const data = await cargarDatos();
+            
+            document.getElementById('debug-info').innerText = "Buscando: " + idEscaneado;
 
-            if (!data) { reiniciar(); return; }
+            const { data, error } = await _supabase
+                .from('asistencia')
+                .select('*')
+                .eq('qr_id', idEscaneado)
+                .maybeSingle();
 
-            let user = null;
-            let yaEntro = false;
-            let horaEntrada = "";
-
-            for (let row of data) {
-                // Buscar en Lista 1
-                if (row.ID1 && row.ID1.toString().trim() === idEscaneado) {
-                    user = { id: idEscaneado, nombre: row.USUARIO1, tipo: row.TIPO1, colId: 'ID1', colEntry: 'ENTRADA1' };
-                    if (row.ENTRADA1 && row.ENTRADA1.toString().trim() !== "") {
-                        yaEntro = true;
-                        horaEntrada = row.ENTRADA1;
-                    }
-                    break;
-                }
-                // Buscar en Lista 2
-                if (row.ID2 && row.ID2.toString().trim() === idEscaneado) {
-                    user = { id: idEscaneado, nombre: row.USUARIO2, tipo: row.TIPO2, colId: 'ID2', colEntry: 'ENTRADA2' };
-                    if (row.ENTRADA2 && row.ENTRADA2.toString().trim() !== "") {
-                        yaEntro = true;
-                        horaEntrada = row.ENTRADA2;
-                    }
-                    break;
-                }
+            if (error || !data) {
+                alert("ID NO ENCONTRADO: " + idEscaneado);
+                reiniciar();
+                return;
             }
 
-            if (user) {
-                selectedUser = user;
-                const infoBox = document.getElementById('info-box');
-                const msgRepetido = document.getElementById('msg-repetido');
-                const btnValidar = document.getElementById('btn-validar');
+            selectedUser = data;
+            const infoBox = document.getElementById('info-box');
+            const msgRepetido = document.getElementById('msg-repetido');
+            const btnValidar = document.getElementById('btn-validar');
 
-                infoBox.style.display = 'block';
-                document.getElementById('u-nombre').innerText = user.nombre || "Invitado";
-                document.getElementById('u-tipo').innerText = "Categoría: " + (user.tipo || "General");
+            infoBox.style.display = 'block';
+            document.getElementById('u-nombre').innerText = data.nombre || "Invitado";
+            document.getElementById('u-tipo').innerText = "Categoría: " + (data.tipo || "General");
 
-                if (yaEntro) {
-                    msgRepetido.innerHTML = `<span class="ya-ingreso">⚠️ YA INGRESÓ<br><small>Hora: ${horaEntrada}</small></span>`;
-                    btnValidar.style.display = 'none';
-                    setTimeout(reiniciar, 4000); // 4 segundos para ver el error y vuelve a escanear
-                } else {
-                    msgRepetido.innerHTML = "";
-                    btnValidar.style.display = 'block';
-                    btnValidar.disabled = false;
-                    btnValidar.innerText = "✅ CONFIRMAR ENTRADA";
-                }
+            if (data.entrada) {
+                msgRepetido.innerHTML = `<span class="ya-ingreso">⚠️ YA INGRESÓ<br><small>Hora: ${data.entrada}</small></span>`;
+                btnValidar.style.display = 'none';
+                setTimeout(reiniciar, 4000);
             } else {
-                alert("ID: " + idEscaneado + " NO ENCONTRADO EN NINGUNA LISTA.");
-                reiniciar();
+                msgRepetido.innerHTML = "";
+                btnValidar.style.display = 'block';
+                btnValidar.disabled = false;
+                btnValidar.innerText = "✅ CONFIRMAR ENTRADA";
             }
         }
 
@@ -154,30 +126,22 @@
             btn.innerText = "⏳ REGISTRANDO...";
 
             const ahora = new Date();
-            const horaString = ahora.getHours() + ":" + ahora.getMinutes().toString().padStart(2, '0');
-            
-            const payload = {};
-            payload[selectedUser.colEntry] = horaString;
+            const horaString = ahora.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
             try {
-                const response = await fetch(`${API_URL}/${selectedUser.colId}/${selectedUser.id}`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ data: [payload] })
-                });
+                const { error } = await _supabase
+                    .from('asistencia')
+                    .update({ entrada: horaString })
+                    .eq('id', selectedUser.id);
 
-                if (response.ok) {
-                    alert("¡Bienvenido/a, " + selectedUser.nombre + "!");
-                    document.getElementById('info-box').style.display = 'none';
-                    await cargarDatos(); // Actualiza contadores
-                    reiniciar();
-                } else {
-                    throw new Error("Error en servidor");
-                }
+                if (error) throw error;
+
+                alert("¡Acceso concedido!");
+                await cargarDatos();
+                reiniciar();
             } catch (e) {
-                alert("Error al guardar: Intenta de nuevo.");
+                alert("Error al guardar.");
                 btn.disabled = false;
-                btn.innerText = "✅ CONFIRMAR ENTRADA";
             }
         }
 
@@ -187,7 +151,6 @@
             if (html5QrCode) html5QrCode.resume();
         }
 
-        // Carga inicial
         cargarDatos();
     </script>
 </body>
