@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Scanner Pro - Supabase</title>
+    <title>Scanner Pro - Dual Slot</title>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://unpkg.com/html5-qrcode"></script>
     <style>
@@ -24,9 +24,9 @@
 <body>
 
     <div class="card">
-        <h2>Acceso al Evento</h2>
+        <h2>Control de Acceso</h2>
         <div class="stats">
-            <div>Llegaron <span id="txt-llegaron" class="stat-num">0</span></div>
+            <div>Ingresos <span id="txt-llegaron" class="stat-num">0</span></div>
             <div>Pendientes <span id="txt-pendientes" class="stat-num">0</span></div>
         </div>
         <button id="btn-scan" class="btn" onclick="iniciarCamara()">📷 ABRIR CÁMARA</button>
@@ -39,9 +39,10 @@
         <p id="u-tipo" style="color:#666; margin: 5px 0 10px 0;"></p>
         <div id="msg-repetido"></div>
         <button id="btn-validar" class="btn" onclick="validarIngreso()">✅ CONFIRMAR ENTRADA</button>
+        <button class="btn" style="background:#eee; color:#333;" onclick="reiniciar()">CANCELAR</button>
     </div>
 
-    <div id="debug-info">Cargando Supabase...</div>
+    <div id="debug-info">Conectando a Supabase...</div>
 
     <script>
         const SUPABASE_URL = "https://hrcxyidcoarwnuosjihl.supabase.co";
@@ -50,22 +51,35 @@
         const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
         let html5QrCode;
-        let selectedUser = null;
+        let selectedRow = null; // Fila completa de la DB
+        let slotActivo = null; // Guardará si es el invitado 1 o el 2
 
         async function cargarDatos() {
             try {
                 const { data, error } = await _supabase.from('asistencia').select('*');
                 if (error) throw error;
 
-                const llegaron = data.filter(r => r.entrada).length;
-                const total = data.length;
+                let totalIngresos = 0;
+                let totalInvitados = 0;
 
-                document.getElementById('txt-llegaron').innerText = llegaron;
-                document.getElementById('txt-pendientes').innerText = (total - llegaron);
-                document.getElementById('debug-info').innerText = `Sync OK. Invitados: ${total}`;
-                return data;
+                data.forEach(fila => {
+                    // Contamos Invitado 1
+                    if (fila.ID1) {
+                        totalInvitados++;
+                        if (fila.ENTRADA1) totalIngresos++;
+                    }
+                    // Contamos Invitado 2
+                    if (fila.ID2) {
+                        totalInvitados++;
+                        if (fila.ENTRADA2) totalIngresos++;
+                    }
+                });
+
+                document.getElementById('txt-llegaron').innerText = totalIngresos;
+                document.getElementById('txt-pendientes').innerText = (totalInvitados - totalIngresos);
+                document.getElementById('debug-info').innerText = `Sync OK. Total en lista: ${totalInvitados}`;
             } catch (e) {
-                document.getElementById('debug-info').innerText = "Error de conexión.";
+                document.getElementById('debug-info').innerText = "Error de conexión o RLS.";
                 console.error(e);
             }
         }
@@ -84,34 +98,46 @@
         async function onScanSuccess(decodedText) {
             html5QrCode.pause(true);
             const idEscaneado = decodedText.trim();
-            
-            document.getElementById('debug-info').innerText = "Buscando: " + idEscaneado;
+            document.getElementById('debug-info').innerText = "Buscando ID: " + idEscaneado;
 
+            // Buscamos si el ID existe en la columna ID1 O en la columna ID2
             const { data, error } = await _supabase
                 .from('asistencia')
                 .select('*')
-                .eq('qr_id', idEscaneado)
+                .or(`ID1.eq.${idEscaneado},ID2.eq.${idEscaneado}`)
                 .maybeSingle();
 
             if (error || !data) {
-                alert("ID NO ENCONTRADO: " + idEscaneado);
+                alert("ID NO REGISTRADO: " + idEscaneado);
                 reiniciar();
                 return;
             }
 
-            selectedUser = data;
+            selectedRow = data;
+            
+            // Determinar cuál de los dos espacios de la fila es el escaneado
+            if (data.ID1 == idEscaneado) {
+                slotActivo = 1;
+                mostrarPerfil(data.USUARIO1, data.TIPO1, data.ENTRADA1);
+            } else {
+                slotActivo = 2;
+                mostrarPerfil(data.USUARIO2, data.TIPO2, data.ENTRADA2);
+            }
+        }
+
+        function mostrarPerfil(nombre, tipo, entrada) {
             const infoBox = document.getElementById('info-box');
             const msgRepetido = document.getElementById('msg-repetido');
             const btnValidar = document.getElementById('btn-validar');
 
             infoBox.style.display = 'block';
-            document.getElementById('u-nombre').innerText = data.nombre || "Invitado";
-            document.getElementById('u-tipo').innerText = "Categoría: " + (data.tipo || "General");
+            document.getElementById('u-nombre').innerText = nombre || "Invitado sin nombre";
+            document.getElementById('u-tipo').innerText = "Tipo: " + (tipo || "N/A");
 
-            if (data.entrada) {
-                msgRepetido.innerHTML = `<span class="ya-ingreso">⚠️ YA INGRESÓ<br><small>Hora: ${data.entrada}</small></span>`;
+            if (entrada) {
+                msgRepetido.innerHTML = `<span class="ya-ingreso">⚠️ YA INGRESÓ<br><small>Registrado a las: ${entrada}</small></span>`;
                 btnValidar.style.display = 'none';
-                setTimeout(reiniciar, 4000);
+                setTimeout(reiniciar, 5000);
             } else {
                 msgRepetido.innerHTML = "";
                 btnValidar.style.display = 'block';
@@ -123,34 +149,40 @@
         async function validarIngreso() {
             const btn = document.getElementById('btn-validar');
             btn.disabled = true;
-            btn.innerText = "⏳ REGISTRANDO...";
+            btn.innerText = "⏳ GUARDANDO...";
 
             const ahora = new Date();
             const horaString = ahora.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
+            // Definimos dinámicamente qué columna actualizar (ENTRADA1 o ENTRADA2)
+            const updates = {};
+            updates[`ENTRADA${slotActivo}`] = horaString;
+
             try {
                 const { error } = await _supabase
                     .from('asistencia')
-                    .update({ entrada: horaString })
-                    .eq('id', selectedUser.id);
+                    .update(updates)
+                    .eq('id', selectedRow.id); // Usamos la columna 'id' única de la fila
 
                 if (error) throw error;
 
-                alert("¡Acceso concedido!");
+                alert("¡Entrada confirmada!");
                 await cargarDatos();
                 reiniciar();
             } catch (e) {
-                alert("Error al guardar.");
+                alert("Error al actualizar la base de datos.");
                 btn.disabled = false;
             }
         }
 
         function reiniciar() {
             document.getElementById('info-box').style.display = 'none';
-            selectedUser = null;
+            selectedRow = null;
+            slotActivo = null;
             if (html5QrCode) html5QrCode.resume();
         }
 
+        // Ejecutar carga inicial
         cargarDatos();
     </script>
 </body>
